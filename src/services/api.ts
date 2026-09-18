@@ -120,16 +120,87 @@ function saveStoredTests(tests: ScreeningRecord[]) {
   } catch (e) {}
 }
 
+function mapBackendPatient(p: any): Patient {
+  return {
+    id: p.id,
+    nameOrInitials: p.name || p.nameOrInitials,
+    age: p.age,
+    ageGroup: p.age_group || deriveAgeGroup(p.age),
+    sex: p.sex || 'Prefer not to say',
+    wardOrRoom: p.ward || '',
+    admissionNotes: p.admission_notes || '',
+    createdAt: p.created_at || new Date().toISOString(),
+    lastScreeningAt: p.last_screening_at,
+    screeningCount: p.screening_count || 0,
+  };
+}
+
+function mapBackendTest(t: any): ScreeningRecord {
+  const finalState = (t.final_result || 'LOW_RISK') as 'LOW_RISK' | 'RETEST' | 'POSSIBLE_RISK';
+  return {
+    id: t.id,
+    patientId: t.patient_id,
+    patientNameOrInitials: t.patient_name || 'Patient',
+    patientAge: t.patient_age || 65,
+    patientAgeGroup: t.patient_age_group || '60–75',
+    wardOrRoom: t.ward || 'Clinical Ward',
+    createdAt: t.started_at || new Date().toISOString(),
+    screeningState: finalState,
+    signalQuality: t.signal_quality || 'GOOD',
+    operatorNurse: 'K. Swamy (RN)',
+    explainability: {
+      signalQuality: t.signal_quality || 'GOOD',
+      piezoEventDetected: t.piezo_detected ?? true,
+      movementEventDetected: t.motion_detected ?? true,
+      sensorAgreement: t.sensor_agreement || 'HIGH',
+      swallowDurationMs: t.swallow_duration ?? 750,
+      dominantFrequencyHz: t.dominant_frequency ?? 12.5,
+      spectralFeaturesSummary: `${t.spectral_peak_count || 2} spectral bursts identified`,
+      mlAssessment: t.ml_prediction || (finalState === 'POSSIBLE_RISK' ? 'ABNORMAL' : 'NORMAL'),
+      ruleVerification: t.rule_result === 'PASS' ? 'PASS' : 'FLAG',
+      confidenceScorePercent: t.ml_probability ? Math.round(t.ml_probability * 100) : 85,
+      clinicalExplanations: Array.isArray(t.explanation) ? t.explanation : (t.explanation ? [t.explanation] : []),
+      retestReasons: finalState === 'RETEST' ? (Array.isArray(t.explanation) ? t.explanation : []) : undefined,
+    },
+    durationSeconds: 5,
+    recordedDataPointsCount: 250,
+    isDemoSimulation: false,
+    recommendationText: t.recommendation || 'Screening result only – not a medical diagnosis.',
+  };
+}
+
 export const api = {
+  // Base URL & PDF Download URL
+  getBaseUrl(): string {
+    return API_BASE_URL;
+  },
+
+  getReportPdfUrl(testId: string): string {
+    return `${API_BASE_URL}/api/reports/${testId}?format=pdf`;
+  },
+
   // Device Status
   async getDeviceStatus(): Promise<DeviceStatus> {
-    if (!IS_DEMO_MODE) {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/device/status`, { signal: AbortSignal.timeout(1500) });
-        if (res.ok) return await res.json();
-      } catch (err) {
-        // Fall back to mock
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/device/status`, { signal: AbortSignal.timeout(2000) });
+      if (res.ok) {
+        const data = await res.json();
+        return {
+          esp32Id: data.esp32_id || 'ESP32-SWALLOW-01',
+          bleConnected: data.ble_connected ?? false,
+          bleDeviceName: data.ble_device_name || 'KanthaRakshak-BLE',
+          firmwareVersion: data.firmware_version || 'v1.4.2-hackathon',
+          batteryPercentage: data.battery_percentage ?? 88,
+          isCharging: data.is_charging ?? false,
+          packetRateHz: data.packet_rate_hz ?? 50,
+          lastPacketTimestamp: data.last_packet_timestamp || new Date().toISOString(),
+          piezoAdcState: (data.piezo_adc_state || 'ACTIVE') as any,
+          mpu6050State: (data.mpu6050_state || 'ACTIVE') as any,
+          overallStatus: (data.overall_status === 'DISCONNECTED' ? 'DISCONNECTED' : data.overall_status === 'WARNING' ? 'WARNING' : 'READY') as any,
+        };
       }
+    } catch (err) {
+      // Fall back to mock
     }
     return {
       ...mockDeviceStatus,
@@ -144,22 +215,28 @@ export const api = {
 
   // Patients
   async getPatients(): Promise<Patient[]> {
-    if (!IS_DEMO_MODE) {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/patients`, { signal: AbortSignal.timeout(1500) });
-        if (res.ok) return await res.json();
-      } catch (err) {}
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/patients`, { signal: AbortSignal.timeout(2500) });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          return data.map(mapBackendPatient);
+        }
+      }
+    } catch (err) {
+      console.warn('Backend patients API unreachable, using local store', err);
     }
     return getStoredPatients();
   },
 
   async getPatient(id: string): Promise<Patient | null> {
-    if (!IS_DEMO_MODE) {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/patients/${id}`, { signal: AbortSignal.timeout(1500) });
-        if (res.ok) return await res.json();
-      } catch (err) {}
-    }
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/patients/${id}`, { signal: AbortSignal.timeout(2000) });
+      if (res.ok) {
+        const data = await res.json();
+        return mapBackendPatient(data);
+      }
+    } catch (err) {}
     const patients = getStoredPatients();
     return patients.find((p) => p.id.toLowerCase() === id.toLowerCase()) || null;
   },
@@ -180,20 +257,28 @@ export const api = {
       screeningCount: 0,
     };
 
-    if (!IS_DEMO_MODE) {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/patients`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newPatient),
-          signal: AbortSignal.timeout(2000),
-        });
-        if (res.ok) return await res.json();
-      } catch (err) {}
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/patients`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: payload.id,
+          name: payload.nameOrInitials,
+          age: payload.age,
+          sex: payload.sex || 'Prefer not to say',
+          ward: payload.wardOrRoom || '',
+        }),
+        signal: AbortSignal.timeout(3000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return mapBackendPatient(data);
+      }
+    } catch (err) {
+      console.warn('Failed to persist patient to backend, using local store', err);
     }
 
     const patients = getStoredPatients();
-    // remove if exists
     const filtered = patients.filter((p) => p.id.toLowerCase() !== payload.id.toLowerCase());
     const updated = [newPatient, ...filtered];
     saveStoredPatients(updated);
@@ -202,60 +287,74 @@ export const api = {
 
   // Screening Tests
   async getTests(): Promise<ScreeningRecord[]> {
-    if (!IS_DEMO_MODE) {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/tests`, { signal: AbortSignal.timeout(1500) });
-        if (res.ok) return await res.json();
-      } catch (err) {}
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/tests`, { signal: AbortSignal.timeout(2500) });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          return data.map(mapBackendTest);
+        }
+      }
+    } catch (err) {
+      console.warn('Backend tests API unreachable, using local store', err);
     }
     return getStoredTests();
   },
 
   async getTest(testId: string): Promise<ScreeningRecord | null> {
-    if (!IS_DEMO_MODE) {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/tests/${testId}`, { signal: AbortSignal.timeout(1500) });
-        if (res.ok) return await res.json();
-      } catch (err) {}
-    }
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/tests/${testId}`, { signal: AbortSignal.timeout(2000) });
+      if (res.ok) {
+        const data = await res.json();
+        return mapBackendTest(data);
+      }
+    } catch (err) {}
     const tests = getStoredTests();
     return tests.find((t) => t.id.toLowerCase() === testId.toLowerCase()) || null;
   },
 
   async startTest(patientId: string): Promise<{ testId: string }> {
-    if (!IS_DEMO_MODE) {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/tests/start`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ patient_id: patientId }),
-          signal: AbortSignal.timeout(2000),
-        });
-        if (res.ok) return await res.json();
-      } catch (err) {}
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/tests/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patient_id: patientId }),
+        signal: AbortSignal.timeout(3000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return { testId: data.test_id };
+      }
+    } catch (err) {
+      console.warn('Failed to start test on backend, generating local ID', err);
     }
     const generatedId = `TEST-${Math.floor(1000 + Math.random() * 9000)}`;
     return { testId: generatedId };
   },
 
   async finishTest(testId: string, record: ScreeningRecord): Promise<ScreeningRecord> {
-    if (!IS_DEMO_MODE) {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/tests/${testId}/finish`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(record),
-          signal: AbortSignal.timeout(2000),
-        });
-        if (res.ok) return await res.json();
-      } catch (err) {}
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/tests/${testId}/finish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          force_result: record.screeningState,
+          operator_notes: `Operator: ${record.operatorNurse}`,
+        }),
+        signal: AbortSignal.timeout(3000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return mapBackendTest(data);
+      }
+    } catch (err) {
+      console.warn('Backend finish test error, saving locally', err);
     }
 
     const tests = getStoredTests();
     const updated = [record, ...tests.filter((t) => t.id !== record.id)];
     saveStoredTests(updated);
 
-    // Update patient's last screening
     const patients = getStoredPatients();
     const patientIndex = patients.findIndex((p) => p.id === record.patientId);
     if (patientIndex >= 0) {

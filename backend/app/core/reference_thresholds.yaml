@@ -1,0 +1,64 @@
+# KANTHARAKSHAK / JEEVASWARA REFERENCE THRESHOLDS
+#
+# REGULATORY COMPLIANCE WARNING:
+# Values marked with 'validated: false' are experimental prototype heuristics for hackathon testing.
+# They are NOT medically validated diagnostic cutoffs.
+# Validated thresholds from clinical IRB studies must replace these values in future revisions.
+
+version: "1.0.0-prototype"
+research_validation_required: true
+
+thresholds:
+  swallow_duration_min:
+    value: 450.0
+    unit: "ms"
+    source: "Literature review (Kendall et al., 2003 pharyngeal transit estimates)"
+    validated: false
+    notes: "Acoustic bursts under 450ms typically correspond to coughs, throat clearings, or non-swallow artifacts."
+
+  swallow_duration_max:
+    value: 1250.0
+    unit: "ms"
+    source: "Clinical observation & normative adult bolus clearance reference"
+    validated: false
+    notes: "Acoustic durations exceeding 1250ms may indicate prolonged transit, piecemeal deglutition, or delayed clearing."
+
+  piezo_peak_detection:
+    value: 0.28
+    unit: "normalized_amplitude"
+    source: "Benchtop acoustic pre-amplifier calibration (12-bit ADC)"
+    validated: false
+    notes: "Normalized voltage envelope cutoff distinguishing pharyngeal sound from baseline respiration."
+
+  motion_elevation_g:
+    value: 0.18
+    unit: "g"
+    source: "MPU6050 vertical excursion dynamic range tests"
+    validated: false
+    notes: "Thyroid cartilage superior-anterior displacement acceleration threshold."
+
+  min_snr_db:
+    value: 12.0
+    unit: "dB"
+    source: "Engineering signal-to-noise floor threshold"
+    validated: false
+    notes: "Recordings below 12dB SNR are graded POOR quality and trigger automatic RETEST."
+
+  max_sensor_lag_ms:
+    value: 250.0
+    unit: "ms"
+    source: "Acoustic-kinematic temporal coupling window"
+    validated: false
+    notes: "Maximum permissible lag between piezo energy onset and MPU6050 elevation peak before flagging DISAGREED."
+
+  min_confidence_score:
+    value: 0.65
+    unit: "probability"
+    source: "Internal classification threshold"
+    validated: false
+    notes: "Low model confidence triggers RETEST rather than false risk classification."
+
+demographic_policy:
+  age_stratified_thresholds_enabled: false
+  policy_note: "Age group is recorded solely for research audit stratification. Decision logic thresholds are not modulated purely by age."
+  validated: false

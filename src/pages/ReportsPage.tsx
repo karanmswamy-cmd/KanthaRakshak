@@ -97,6 +97,17 @@ export const ReportsPage: React.FC = () => {
             ))}
           </select>
 
+          <a
+            href={api.getReportPdfUrl(selectedTestId)}
+            target="_blank"
+            rel="noopener noreferrer"
+            download={`KanthaRakshak_Report_${selectedTestId}.pdf`}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-bold shadow-xs transition-colors"
+          >
+            <Download className="w-4 h-4 text-slate-500" />
+            <span>Download PDF</span>
+          </a>
+
           <button
             onClick={handlePrint}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold shadow-xs transition-colors"
