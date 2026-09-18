@@ -25,6 +25,13 @@ from app.pipeline.accelerometer import (
 from app.pipeline.event_detection import detect_swallow_event, NO_VALID_SWALLOW
 from app.pipeline.quality_assessment import assess_signal_quality
 from app.pipeline.feature_extractor import extract_all_features
+from app.pipeline.dataset_loader import (
+    normalize_labels,
+    map_dataset_columns,
+    load_public_research_dataset,
+    patient_wise_train_test_split
+)
+from app.pipeline.model_trainer import compute_offline_shap_summary, NUMERICAL_FEATURE_COLUMNS
 from app.pipeline.inference import predict_session
 
 __all__ = [
@@ -47,5 +54,12 @@ __all__ = [
     "detect_swallow_event",
     "assess_signal_quality",
     "extract_all_features",
+    "normalize_labels",
+    "map_dataset_columns",
+    "load_public_research_dataset",
+    "patient_wise_train_test_split",
+    "compute_offline_shap_summary",
+    "NUMERICAL_FEATURE_COLUMNS",
     "predict_session",
 ]
+

@@ -33,19 +33,19 @@
     "mfcc_5"
   ],
   "uses_age": false,
-  "training_date": "2026-09-18T09:45:51.844258",
+  "training_date": "2026-09-18T10:35:22.554274",
   "validation_method": "StratifiedGroupKFold(n_splits=5, group='patient_code')",
   "performance_metrics": {
-    "sensitivity_mean": 1.0,
-    "sensitivity_std": 0.0,
+    "sensitivity_mean": 0.9818,
+    "sensitivity_std": 0.0364,
     "specificity_mean": 1.0,
     "specificity_std": 0.0,
     "precision_mean": 1.0,
     "precision_std": 0.0,
-    "f1_mean": 1.0,
-    "f1_std": 0.0,
-    "balanced_accuracy_mean": 1.0,
-    "balanced_accuracy_std": 0.0,
+    "f1_mean": 0.9905,
+    "f1_std": 0.019,
+    "balanced_accuracy_mean": 0.9909,
+    "balanced_accuracy_std": 0.0182,
     "roc_auc_mean": 1.0,
     "roc_auc_std": 0.0
   },
@@ -58,9 +58,9 @@
       "f1": 1.0,
       "balanced_accuracy": 1.0,
       "roc_auc": 1.0,
-      "true_positives": 9,
+      "true_positives": 8,
       "false_negatives": 0,
-      "true_negatives": 31,
+      "true_negatives": 32,
       "false_positives": 0
     },
     "40\u201359": {
@@ -71,9 +71,9 @@
       "f1": 1.0,
       "balanced_accuracy": 1.0,
       "roc_auc": 1.0,
-      "true_positives": 10,
+      "true_positives": 14,
       "false_negatives": 0,
-      "true_negatives": 30,
+      "true_negatives": 26,
       "false_positives": 0
     },
     "60\u201375": {
@@ -84,9 +84,9 @@
       "f1": 1.0,
       "balanced_accuracy": 1.0,
       "roc_auc": 1.0,
-      "true_positives": 9,
+      "true_positives": 15,
       "false_negatives": 0,
-      "true_negatives": 31,
+      "true_negatives": 25,
       "false_positives": 0
     },
     "76+": {
@@ -97,9 +97,9 @@
       "f1": 1.0,
       "balanced_accuracy": 1.0,
       "roc_auc": 1.0,
-      "true_positives": 10,
+      "true_positives": 15,
       "false_negatives": 0,
-      "true_negatives": 30,
+      "true_negatives": 25,
       "false_positives": 0
     }
   },

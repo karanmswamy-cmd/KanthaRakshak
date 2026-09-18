@@ -73,13 +73,24 @@ def generate_synthetic_research_cohort(
             onset_t = rng.uniform(1200.0, 1800.0)
             onset_idx = int(onset_t / 20.0)
 
-            if label == "NORMAL":
-                # Single coordinated burst: duration 500ms - 950ms
-                duration_ms = rng.uniform(550.0, 950.0)
-                dur_samples = max(10, int(duration_ms / 20.0))
-                dom_freq = rng.uniform(10.0, 16.0)
+            # Borderline biological variability:
+            # - ~10% of normal swallows exhibit mild clearing hesitation or elderly transit delay (false-positive challenge)
+            # - ~10% of abnormal swallows exhibit single-burst penetration/silent aspiration (false-negative challenge)
+            is_borderline = bool(rng.rand() < 0.10)
 
-                # Piezo burst (bell-shaped modulated sinusoid)
+            if label == "NORMAL":
+                if is_borderline:
+                    # Mildly prolonged clearing in healthy elderly subject
+                    duration_ms = rng.uniform(950.0, 1250.0)
+                    dom_freq = rng.uniform(8.5, 12.0)
+                    lag_samples = int(rng.uniform(3, 7)) # 60ms - 140ms
+                else:
+                    # Typical coordinated burst: duration 550ms - 950ms
+                    duration_ms = rng.uniform(550.0, 950.0)
+                    dom_freq = rng.uniform(10.0, 16.0)
+                    lag_samples = int(rng.uniform(1, 4)) # 20ms - 80ms
+
+                dur_samples = max(10, int(duration_ms / 20.0))
                 burst_t = np.linspace(0, 1, dur_samples)
                 env = np.sin(np.pi * burst_t) ** 2
                 carrier = np.sin(2 * np.pi * dom_freq * (burst_t * (duration_ms / 1000.0)))
@@ -88,8 +99,7 @@ def generate_synthetic_research_cohort(
                 end_idx = min(n_samples, onset_idx + dur_samples)
                 piezo_noise[onset_idx:end_idx] += burst_piezo[:end_idx - onset_idx]
 
-                # Hyolaryngeal excursion on MPU6050 (synchronized, lag 20ms - 80ms)
-                lag_samples = int(rng.uniform(1, 4))
+                # Hyolaryngeal excursion on MPU6050
                 m_onset = min(n_samples - 5, onset_idx + lag_samples)
                 m_dur = int(dur_samples * rng.uniform(0.9, 1.1))
                 m_end = min(n_samples, m_onset + m_dur)
@@ -99,22 +109,34 @@ def generate_synthetic_research_cohort(
                 az[m_onset:m_end] += 0.15 * np.sin(motion_t)
 
             else:
-                # ABNORMAL: prolonged (>1350ms), multiple fragmented bursts or poor synchronization
-                duration_ms = rng.uniform(1350.0, 2200.0)
-                dur_samples = max(25, int(duration_ms / 20.0))
-                dom_freq = rng.uniform(6.0, 9.5)
+                if is_borderline:
+                    # Borderline abnormal: single slightly prolonged burst (subtle dysfunction / silent penetration)
+                    duration_ms = rng.uniform(1150.0, 1400.0)
+                    dom_freq = rng.uniform(8.0, 11.0)
+                    lag_samples = int(rng.uniform(4, 9)) # 80ms - 180ms
+                    dur_samples = max(20, int(duration_ms / 20.0))
 
-                # Multiple fragmented bursts (hesitation, multiple clearing efforts)
-                burst_t = np.linspace(0, 3 * np.pi, dur_samples)
-                env = np.abs(np.sin(burst_t)) * 0.55
-                carrier = np.sin(2 * np.pi * dom_freq * (np.linspace(0, duration_ms/1000.0, dur_samples)))
-                burst_piezo = env * (0.5 + 0.5 * carrier)
+                    burst_t = np.linspace(0, 2 * np.pi, dur_samples)
+                    env = np.abs(np.sin(burst_t)) * 0.50
+                    carrier = np.sin(2 * np.pi * dom_freq * (np.linspace(0, duration_ms/1000.0, dur_samples)))
+                    burst_piezo = env * (0.5 + 0.5 * carrier)
+                else:
+                    # Manifestly abnormal: prolonged (>1400ms), multiple fragmented bursts, poor synchronization
+                    duration_ms = rng.uniform(1400.0, 2250.0)
+                    dom_freq = rng.uniform(5.5, 9.0)
+                    lag_samples = int(rng.uniform(7, 16)) # 140ms - 320ms delayed laryngeal excursion
+                    dur_samples = max(25, int(duration_ms / 20.0))
+
+                    # Multiple fragmented bursts (hesitation, multiple clearing efforts)
+                    burst_t = np.linspace(0, 3 * np.pi, dur_samples)
+                    env = np.abs(np.sin(burst_t)) * 0.55
+                    carrier = np.sin(2 * np.pi * dom_freq * (np.linspace(0, duration_ms/1000.0, dur_samples)))
+                    burst_piezo = env * (0.5 + 0.5 * carrier)
 
                 end_idx = min(n_samples, onset_idx + dur_samples)
                 piezo_noise[onset_idx:end_idx] += burst_piezo[:end_idx - onset_idx]
 
                 # Dyssynchronous or fragmented motion
-                lag_samples = int(rng.uniform(6, 15)) # 120ms - 300ms delayed laryngeal excursion
                 m_onset = min(n_samples - 5, onset_idx + lag_samples)
                 m_dur = dur_samples
                 m_end = min(n_samples, m_onset + m_dur)
@@ -165,6 +187,123 @@ def generate_synthetic_research_cohort(
 
     return records
 
+def normalize_labels(
+    series: pd.Series,
+    label_mapping: Optional[Dict[Any, str]] = None
+) -> pd.Series:
+    """
+    Standardizes disparate clinical study labels into canonical 'NORMAL' and 'ABNORMAL'.
+    Default mappings support common research annotations (0/1, healthy/dysphagia, etc.).
+    """
+    default_mapping = {
+        # Normal representations
+        0: "NORMAL",
+        "0": "NORMAL",
+        "normal": "NORMAL",
+        "healthy": "NORMAL",
+        "control": "NORMAL",
+        "typical": "NORMAL",
+        "non-dysphagic": "NORMAL",
+        "NORMAL": "NORMAL",
+        # Abnormal representations
+        1: "ABNORMAL",
+        "1": "ABNORMAL",
+        "abnormal": "ABNORMAL",
+        "dysphagia": "ABNORMAL",
+        "dysphagic": "ABNORMAL",
+        "impaired": "ABNORMAL",
+        "pathological": "ABNORMAL",
+        "aspiration": "ABNORMAL",
+        "penetration": "ABNORMAL",
+        "ABNORMAL": "ABNORMAL"
+    }
+    mapping = {**default_mapping, **(label_mapping or {})}
+    # Case-insensitive string mapping
+    cleaned_series = series.map(lambda x: mapping.get(str(x).lower(), mapping.get(x, "ABNORMAL")))
+    return cleaned_series
+
+def map_dataset_columns(
+    df: pd.DataFrame,
+    column_mapping: Dict[str, str]
+) -> pd.DataFrame:
+    """
+    Maps heterogeneous column nomenclature from public research datasets
+    (e.g., PhysioNet, Zenodo, Kaggle swallow acoustic corpora) to canonical pipeline schema.
+    """
+    mapped_df = df.rename(columns=column_mapping).copy()
+    return mapped_df
+
+def load_public_research_dataset(
+    file_path: str,
+    column_mapping: Optional[Dict[str, str]] = None,
+    label_mapping: Optional[Dict[Any, str]] = None
+) -> pd.DataFrame:
+    """
+    Loads and standardizes an external public deglutition research dataset.
+    Validates patient identifiers and normalizes target labels.
+    """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Research dataset not found: {file_path}")
+
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext in (".tsv", ".txt"):
+        df = pd.read_csv(file_path, sep="\t")
+    elif ext == ".json":
+        df = pd.read_json(file_path)
+    else:
+        df = pd.read_csv(file_path)
+
+    if column_mapping:
+        df = map_dataset_columns(df, column_mapping)
+
+    if "label" in df.columns:
+        df["label"] = normalize_labels(df["label"], label_mapping)
+
+    if "age" in df.columns and "age_group" not in df.columns:
+        df["age_group"] = df["age"].apply(lambda a: derive_age_group(int(a)) if pd.notnull(a) else "Unknown")
+
+    if "patient_code" not in df.columns:
+        if "patient_id" in df.columns:
+            df["patient_code"] = df["patient_id"]
+        elif "subject_id" in df.columns:
+            df["patient_code"] = df["subject_id"]
+        else:
+            # Fallback: assign each row unique patient code to avoid accidental false grouping
+            df["patient_code"] = [f"EXT-P-{i:04d}" for i in range(len(df))]
+
+    return df
+
+def patient_wise_train_test_split(
+    df: pd.DataFrame,
+    patient_col: str = "patient_code",
+    test_size: float = 0.20,
+    random_state: int = 42
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Partitions dataset strictly at the patient/subject level.
+    Guarantees zero data leakage: recordings from any single patient
+    reside exclusively in either the training set OR test set.
+    """
+    if patient_col not in df.columns:
+        raise ValueError(f"Patient column '{patient_col}' not found in DataFrame.")
+
+    unique_patients = df[patient_col].unique()
+    rng = np.random.RandomState(random_state)
+    shuffled_patients = rng.permutation(unique_patients)
+
+    n_test_patients = max(1, int(round(len(unique_patients) * test_size)))
+    test_patients = set(shuffled_patients[:n_test_patients])
+    train_patients = set(shuffled_patients[n_test_patients:])
+
+    train_df = df[df[patient_col].isin(train_patients)].copy().reset_index(drop=True)
+    test_df = df[df[patient_col].isin(test_patients)].copy().reset_index(drop=True)
+
+    # Verification of zero leakage
+    overlap = set(train_df[patient_col]).intersection(set(test_df[patient_col]))
+    assert len(overlap) == 0, f"Patient leakage detected: {overlap}"
+
+    return train_df, test_df
+
 def load_cohort_dataframe(save_csv_path: Optional[str] = None) -> pd.DataFrame:
     """
     Loads or generates research cohort DataFrame.
@@ -175,3 +314,4 @@ def load_cohort_dataframe(save_csv_path: Optional[str] = None) -> pd.DataFrame:
         os.makedirs(os.path.dirname(save_csv_path), exist_ok=True)
         df.to_csv(save_csv_path, index=False)
     return df
+

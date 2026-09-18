@@ -278,11 +278,23 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.abspath(".."))
-from app.pipeline.model_trainer import benchmark_models_cv, NUMERICAL_FEATURE_COLUMNS
+from app.pipeline.dataset_loader import patient_wise_train_test_split
+from app.pipeline.model_trainer import benchmark_models_cv, NUMERICAL_FEATURE_COLUMNS, compute_offline_shap_summary, get_candidate_models
 
 df = pd.read_csv("../data/research_cohort_sessions.csv")
-print(f"Benchmarking models across {df['patient_code'].nunique()} patient groups...")
+print(f"Loaded cohort: {len(df)} sessions across {df['patient_code'].nunique()} patients.")
 
+# 1. Zero-Leakage Patient-Wise Train/Test Split Demonstration
+train_df, test_df = patient_wise_train_test_split(df, patient_col="patient_code", test_size=0.25, random_state=42)
+train_patients = set(train_df["patient_code"])
+test_patients = set(test_df["patient_code"])
+overlap = train_patients.intersection(test_patients)
+print(f"Train split: {len(train_df)} sessions ({len(train_patients)} patients)")
+print(f"Test split:  {len(test_df)} sessions ({len(test_patients)} patients)")
+print(f"Patient overlap count: {len(overlap)} (Strictly zero patient data leakage)")
+
+# 2. StratifiedGroupKFold Cross-Validation Benchmark
+print(f"\\nBenchmarking candidate models with 5-fold StratifiedGroupKFold...")
 results = benchmark_models_cv(df, features=NUMERICAL_FEATURE_COLUMNS, n_splits=5)
 metrics_table = []
 for model_name, dat in results.items():
@@ -293,13 +305,32 @@ for model_name, dat in results.items():
         "Specificity": f"{agg['specificity_mean']:.3f} ± {agg['specificity_std']:.3f}",
         "Precision": f"{agg['precision_mean']:.3f} ± {agg['precision_std']:.3f}",
         "F1-Score": f"{agg['f1_mean']:.3f} ± {agg['f1_std']:.3f}",
+        "Balanced Accuracy": f"{agg['balanced_accuracy_mean']:.3f} ± {agg['balanced_accuracy_std']:.3f}",
         "ROC-AUC": f"{agg['roc_auc_mean']:.3f} ± {agg['roc_auc_std']:.3f}"
     })
 
 pd.DataFrame(metrics_table)"""),
+    md_cell("""### Offline Feature Importance / SHAP Inspection
+For tree models (Random Forest / Gradient Boosting), feature attribution can be inspected offline.
+> **Clinical Boundary Warning:** Raw SHAP or Gini values must NEVER be displayed to nursing or bedside staff. Only intuitive categories (duration, alignment, artifact) may be presented in the user interface.
+"""),
+    code_cell("""# Fit candidate Random Forest to inspect offline feature importance
+models = get_candidate_models()
+rf_pipeline = models["Random Forest"]
+X_train = df[NUMERICAL_FEATURE_COLUMNS].values
+y_train = (df["label"] == "ABNORMAL").astype(int).values
+rf_pipeline.fit(X_train, y_train)
+
+shap_summary = compute_offline_shap_summary(rf_pipeline, X_train[:30], feature_names=NUMERICAL_FEATURE_COLUMNS)
+print(f"Explainability Method: {shap_summary['method']}")
+print("Top 8 Influential Biomechanical Features (Offline Research):")
+top_features = list(shap_summary["feature_importance"].items())[:8]
+for feat, score in top_features:
+    print(f"  - {feat}: {score}")"""),
     md_cell("""### Model Comparison Visualizer
 Comparing mean Sensitivity and Specificity across candidate algorithms.
 """),
+
     code_cell("""models = list(results.keys())
 sens = [results[m]["aggregated"]["sensitivity_mean"] for m in models]
 spec = [results[m]["aggregated"]["specificity_mean"] for m in models]

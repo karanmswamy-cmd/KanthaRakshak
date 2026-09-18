@@ -23,6 +23,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.svm import SVC
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.metrics import (
     recall_score,
@@ -76,13 +77,84 @@ def get_candidate_models(random_state: int = 42) -> Dict[str, Pipeline]:
         ]),
         "Support Vector Machine": Pipeline([
             ("scaler", StandardScaler()),
-            ("clf", SVC(kernel="rbf", C=1.0, probability=True, class_weight="balanced", random_state=random_state))
+            ("clf", CalibratedClassifierCV(
+                estimator=SVC(kernel="rbf", C=1.0, class_weight="balanced", random_state=random_state),
+                ensemble=False
+            ))
         ]),
         "Gradient Boosting": Pipeline([
             ("scaler", StandardScaler()),
             ("clf", GradientBoostingClassifier(n_estimators=100, learning_rate=0.08, max_depth=3, random_state=random_state))
         ])
     }
+
+def compute_offline_shap_summary(
+    pipeline: Pipeline,
+    X_sample: np.ndarray,
+    feature_names: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """
+    Offline research explainability utility for data science inspection.
+    NOTE FOR CLINICAL INTERFACE: Never expose raw SHAP values to clinical staff or nurses.
+    Only use high-level categorized rationales in the UI.
+    """
+    feature_names = feature_names or NUMERICAL_FEATURE_COLUMNS
+    clf = pipeline.named_steps.get("clf", pipeline)
+    scaler = pipeline.named_steps.get("scaler", None)
+    X_scaled = scaler.transform(X_sample) if scaler else X_sample
+
+    try:
+        import shap
+        explainer = shap.TreeExplainer(clf)
+        shap_values = explainer.shap_values(X_scaled)
+        # Handle binary classification multi-output
+        if isinstance(shap_values, list) and len(shap_values) > 1:
+            mean_abs_shap = np.mean(np.abs(shap_values[1]), axis=0)
+        else:
+            mean_abs_shap = np.mean(np.abs(shap_values), axis=0)
+
+        importance_dict = {
+            name: float(round(val, 5))
+            for name, val in zip(feature_names, mean_abs_shap)
+        }
+        sorted_importance = dict(sorted(importance_dict.items(), key=lambda x: x[1], reverse=True))
+        return {
+            "method": "SHAP_TreeExplainer",
+            "feature_importance": sorted_importance,
+            "research_notice": "Offline engineering inspection only. Not for clinical display."
+        }
+    except Exception:
+        # Fallback to feature_importances_ or coef_
+        if hasattr(clf, "feature_importances_"):
+            raw_imp = clf.feature_importances_
+            importance_dict = {
+                name: float(round(val, 5))
+                for name, val in zip(feature_names, raw_imp)
+            }
+            sorted_importance = dict(sorted(importance_dict.items(), key=lambda x: x[1], reverse=True))
+            return {
+                "method": "Gini_Feature_Importances",
+                "feature_importance": sorted_importance,
+                "research_notice": "Offline engineering inspection only. Not for clinical display."
+            }
+        elif hasattr(clf, "coef_"):
+            raw_imp = np.abs(clf.coef_[0])
+            importance_dict = {
+                name: float(round(val, 5))
+                for name, val in zip(feature_names, raw_imp)
+            }
+            sorted_importance = dict(sorted(importance_dict.items(), key=lambda x: x[1], reverse=True))
+            return {
+                "method": "Normalized_Coefficients",
+                "feature_importance": sorted_importance,
+                "research_notice": "Offline engineering inspection only. Not for clinical display."
+            }
+        return {
+            "method": "None",
+            "feature_importance": {},
+            "research_notice": "Model does not support direct feature attribution."
+        }
+
 
 def evaluate_predictions(y_true: np.ndarray, y_pred: np.ndarray, y_prob: Optional[np.ndarray] = None) -> Dict[str, float]:
     """

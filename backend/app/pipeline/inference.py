@@ -28,42 +28,44 @@ def get_explainable_categories(
     swallow_detected: bool,
     features: Dict[str, Any],
     ml_prediction: str,
-    probability: float
+    probability: float,
+    diagnostics: Optional[Dict[str, Any]] = None
 ) -> list[str]:
     """
     Translates mathematical telemetry features into clear, intuitive,
     nurse-friendly clinical categories without raw mathematical jargon.
     """
     explanations = []
+    diag_flags = diagnostics.get("flags", []) if diagnostics else []
 
-    # 1. Signal Quality rationale
-    if signal_quality == "POOR":
+    # 1. Signal Quality & Movement Artifact rationale
+    if any("MOTION_ARTIFACT" in f for f in diag_flags):
+        explanations.append("Signal contained excessive movement artifact.")
+    elif signal_quality == "POOR":
         explanations.append("Signal quality was compromised by patient motion or loose sensor placement.")
     elif signal_quality == "FAIR":
         explanations.append("Acoustic signal was acceptable but contained moderate background tremor.")
     else:
         explanations.append("High-integrity acoustic and kinematic baseline recorded.")
 
-    # 2. Event Detection rationale
+    # 2. Sensor Agreement / Disagreement rationale
+    if any("SENSOR_DISAGREEMENT" in f for f in diag_flags) or sensor_agreement == "LOW":
+        explanations.append("Piezo and motion events were poorly aligned.")
+    elif sensor_agreement == "HIGH":
+        delay_ms = features.get("piezo_motion_peak_delay_ms", 0.0)
+        explanations.append(f"Strong biomechanical synchronization: acoustic burst matched laryngeal movement within {delay_ms:.0f} ms.")
+
+    # 3. Event Detection rationale
     if not swallow_detected:
         explanations.append("No valid deglutition burst was identified during the active window.")
         return explanations
 
-    # 3. Temporal Duration rationale
+    # 4. Temporal Duration rationale
     dur = features.get("swallow_duration_ms", 0.0)
-    if dur > 1250.0:
-        explanations.append(f"Swallow event duration ({dur:.0f} ms) was prolonged relative to reference range (450–1250 ms)*.")
-    elif dur < 400.0:
-        explanations.append(f"Swallow duration ({dur:.0f} ms) was unusually brief.")
+    if dur > 1250.0 or dur < 400.0:
+        explanations.append("Swallow event duration differed from configured reference range.")
     else:
         explanations.append(f"Swallow event duration ({dur:.0f} ms) was within expected physiological reference limits (450–1250 ms)*.")
-
-    # 4. Sensor Alignment rationale
-    delay_ms = features.get("piezo_motion_peak_delay_ms", 0.0)
-    if sensor_agreement == "LOW" or delay_ms > 200.0:
-        explanations.append(f"Acoustic swallow sound and laryngeal elevation motion were poorly aligned (lag {delay_ms:.0f} ms).")
-    elif sensor_agreement == "HIGH":
-        explanations.append(f"Strong biomechanical synchronization: acoustic burst matched laryngeal movement within {delay_ms:.0f} ms.")
 
     # 5. Spectral & Effort rationale
     peaks = features.get("spectral_peak_count", 0)
@@ -73,12 +75,13 @@ def get_explainable_categories(
         explanations.append("Acoustic spectral distribution matched a single coordinated deglutition transit.")
 
     # 6. ML Assessment
-    if ml_prediction == "ABNORMAL" and probability >= 0.65:
+    if ml_prediction == "ABNORMAL" and probability >= 0.60:
         explanations.append(f"Biomechanical pattern recognition model flagged atypical swallow dynamics (risk index: {int(probability * 100)}%).")
     elif ml_prediction == "NORMAL":
         explanations.append(f"Biomechanical pattern recognition model classified profile as typical (confidence: {int((1.0 - probability) * 100)}%).")
 
     return explanations
+
 
 class SessionInferenceEngine:
     """
@@ -170,7 +173,7 @@ class SessionInferenceEngine:
             model_ver = "demo-heuristic" if is_demo else self.metadata.get("version", "1.0.0-research")
             uses_age = False
             explanations = get_explainable_categories(
-                quality_category, sensor_agreement, swallow_detected, features, ml_pred, probability
+                quality_category, sensor_agreement, swallow_detected, features, ml_pred, probability, diagnostics=q_diag
             )
             return {
                 "signal_quality": quality_category,
@@ -225,8 +228,9 @@ class SessionInferenceEngine:
             notice = None
 
         explanations = get_explainable_categories(
-            quality_category, sensor_agreement, swallow_detected, features, ml_pred, probability
+            quality_category, sensor_agreement, swallow_detected, features, ml_pred, probability, diagnostics=q_diag
         )
+
 
         return {
             "signal_quality": quality_category,

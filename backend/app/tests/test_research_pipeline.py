@@ -216,3 +216,76 @@ def test_predict_session_demo_mode():
     assert result["demo_mode"] is True
     assert result["notice"] == "Demonstration analysis – not trained clinical model"
     assert result["model_version"] == "demo-heuristic"
+
+def test_signal_quality_sensor_disagreement():
+    # Active high-amplitude piezo sound with living IMU (not flatline) but zero motion excursion
+    np.random.seed(42)
+    t = np.arange(100) * 20.0
+    piezo = np.random.normal(0, 0.01, 100)
+    piezo[40:60] += 0.60
+    # Live IMU with tiny baseline vibration, but no hyolaryngeal excursion
+    ax = np.random.normal(0, 0.003, 100)
+    ay = np.random.normal(0, 0.003, 100)
+    az = np.random.normal(0.98, 0.003, 100)
+    session = TelemetrySession(timestamp_ms=t, piezo=piezo, ax=ax, ay=ay, az=az)
+    category, score, diag = assess_signal_quality(session)
+    assert diag["sensor_disagreement"] is True
+    assert "SENSOR_DISAGREEMENT_NO_MOTION" in diag["flags"]
+
+
+def test_dataset_handling_utilities():
+    import pandas as pd
+    from app.pipeline.dataset_loader import (
+        normalize_labels, map_dataset_columns, patient_wise_train_test_split
+    )
+
+    # 1. Label normalization
+    raw_labels = pd.Series(["healthy", "Dysphagic", "control", "impaired", 0, 1])
+    norm = normalize_labels(raw_labels)
+    assert (norm == pd.Series(["NORMAL", "ABNORMAL", "NORMAL", "ABNORMAL", "NORMAL", "ABNORMAL"])).all()
+
+    # 2. Column mapping
+    sample_df = pd.DataFrame({
+        "time": [0, 20],
+        "mic": [0.1, 0.2],
+        "imu_x": [0.0, 0.1],
+        "patient": ["P1", "P1"]
+    })
+    mapped = map_dataset_columns(sample_df, {"time": "timestamp_ms", "mic": "piezo", "imu_x": "ax", "patient": "patient_code"})
+    assert "timestamp_ms" in mapped.columns
+    assert "piezo" in mapped.columns
+
+    # 3. Patient-wise train/test split with zero leakage
+    multi_patient_df = pd.DataFrame({
+        "patient_code": ["P1", "P1", "P2", "P2", "P3", "P3", "P4", "P4"],
+        "val": range(8)
+    })
+    train_df, test_df = patient_wise_train_test_split(multi_patient_df, test_size=0.25, random_state=42)
+    train_patients = set(train_df["patient_code"])
+    test_patients = set(test_df["patient_code"])
+    assert len(train_patients.intersection(test_patients)) == 0
+    assert len(train_df) + len(test_df) == 8
+
+def test_model_pipelines_and_shap_utility():
+    import pandas as pd
+    from app.pipeline.model_trainer import (
+        get_candidate_models, compute_offline_shap_summary, NUMERICAL_FEATURE_COLUMNS
+    )
+
+    models = get_candidate_models()
+    assert "Logistic Regression" in models
+    assert "Random Forest" in models
+    assert "Support Vector Machine" in models
+    assert "Gradient Boosting" in models
+
+    # Test offline explainability fallback
+    rf = models["Random Forest"]
+    X = np.random.randn(20, len(NUMERICAL_FEATURE_COLUMNS))
+    y = np.random.choice([0, 1], size=20)
+    rf.fit(X, y)
+
+    shap_res = compute_offline_shap_summary(rf, X[:5], feature_names=NUMERICAL_FEATURE_COLUMNS)
+    assert "method" in shap_res
+    assert "feature_importance" in shap_res
+    assert len(shap_res["feature_importance"]) == len(NUMERICAL_FEATURE_COLUMNS)
+

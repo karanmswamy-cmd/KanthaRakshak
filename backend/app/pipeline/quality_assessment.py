@@ -102,6 +102,21 @@ def assess_signal_quality(session: TelemetrySession) -> Tuple[str, float, Dict[s
         penalties += 15.0
         flags.append("MODERATE_MOTION_ARTIFACT")
 
+    # 8. Sensor Disagreement (Microphone contact loss or IMU decoupling)
+    # Dynamic acceleration amplitude (relative to median baseline)
+    dynamic_accel_span = float(np.max(accel_mag) - np.min(accel_mag))
+    sensor_disagreement = False
+    if max_piezo_abs > 0.40 and dynamic_accel_span < 0.025 and "MPU6050_FLATLINE" not in flags:
+        # High acoustic amplitude but completely silent motion: IMU detachment
+        penalties += 25.0
+        flags.append("SENSOR_DISAGREEMENT_NO_MOTION")
+        sensor_disagreement = True
+    elif dynamic_accel_span > 0.45 and max_piezo_abs < 0.035 and "PIEZO_FLATLINE" not in flags:
+        # High motion excursion but virtually zero acoustic energy: mic detachment
+        penalties += 25.0
+        flags.append("SENSOR_DISAGREEMENT_NO_ACOUSTICS")
+        sensor_disagreement = True
+
     # Final Score Synthesis
     raw_score = max(0.0, 100.0 - penalties)
     quality_score = float(round(raw_score, 1))
@@ -124,7 +139,9 @@ def assess_signal_quality(session: TelemetrySession) -> Tuple[str, float, Dict[s
         "max_acceleration_g": round(max_accel, 3),
         "max_jerk_g_per_s": round(max_jerk, 1),
         "gap_count": gap_count,
+        "sensor_disagreement": sensor_disagreement,
         "flags": flags
     }
 
     return quality_category, quality_score, diagnostics
+
